@@ -9,7 +9,6 @@ resource "helm_release" "velero" {
   version          = var.chart_version
   namespace        = var.namespace
   create_namespace = true
-  replace          = true
 
   timeout = 600
 
