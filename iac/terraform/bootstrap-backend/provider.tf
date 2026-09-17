@@ -2,7 +2,9 @@ provider "aws" {
 
   default_tags {
     tags = {
-      created_by = "terraform"
+      ManagedBy  = "terraform"
+      Project    = "SolidaryTech"
+      CostCenter = "NGO-Core"
     }
   }
 }
