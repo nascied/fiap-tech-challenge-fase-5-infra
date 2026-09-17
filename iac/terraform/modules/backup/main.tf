@@ -84,30 +84,64 @@ resource "aws_backup_vault_notifications" "this" {
 # --- Armazenamento do Velero (backup/restore do cluster EKS) ---
 # Fica neste módulo por ser a mesma responsabilidade ("onde os backups moram"),
 # mas a instalação em si (Helm release) é do module.velero.
+#
+# O recurso nativo `aws_s3_bucket` não funciona nesta conta: mesmo criando o
+# bucket sem nenhuma configuração extra, o provider AWS faz um Read logo
+# depois do Create pra popular o state inteiro — inclusive uma chamada
+# GetBucketObjectLockConfiguration — e a SCP da conta AWS Academy nega essa
+# chamada explicitamente, em toda a organização (mesmo bug já corrigido em
+# bootstrap-backend/main.tf). Criar o bucket via CLI (`aws s3api
+# create-bucket`) num `null_resource` evita esse Read por completo. Os 3
+# recursos de configuração abaixo (versioning/public-access-block/lifecycle)
+# são tipos separados, com Read próprio que não toca Object Lock — continuam
+# nativos, só passam a referenciar `var.velero_bucket_name` (string) em vez de
+# um atributo do recurso removido, com `depends_on` explícito pra manter a
+# ordem de criação.
+resource "null_resource" "velero_bucket" {
+  triggers = {
+    bucket_name = var.velero_bucket_name
+  }
 
-resource "aws_s3_bucket" "velero" {
-  bucket = var.velero_bucket_name
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -euo pipefail
+      if aws s3api head-bucket --bucket "${self.triggers.bucket_name}" 2>/dev/null; then
+        echo "Bucket ${self.triggers.bucket_name} já existe, nada a fazer."
+      else
+        aws s3api create-bucket --bucket "${self.triggers.bucket_name}"
+      fi
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "aws s3 rb \"s3://${self.triggers.bucket_name}\" --force || true"
+  }
 }
 
 resource "aws_s3_bucket_versioning" "velero" {
-  bucket = aws_s3_bucket.velero.id
+  bucket = var.velero_bucket_name
 
   versioning_configuration {
     status = "Enabled"
   }
+
+  depends_on = [null_resource.velero_bucket]
 }
 
 resource "aws_s3_bucket_public_access_block" "velero" {
-  bucket = aws_s3_bucket.velero.id
+  bucket = var.velero_bucket_name
 
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+
+  depends_on = [null_resource.velero_bucket]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "velero" {
-  bucket = aws_s3_bucket.velero.id
+  bucket = var.velero_bucket_name
 
   rule {
     id     = "expire-old-backups"
@@ -123,4 +157,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "velero" {
       noncurrent_days = var.retention_days
     }
   }
+
+  depends_on = [null_resource.velero_bucket, aws_s3_bucket_versioning.velero]
 }

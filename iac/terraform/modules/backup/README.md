@@ -4,12 +4,14 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.10.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | 6.44.0 |
+| <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.2 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.44.0 |
+| <a name="provider_null"></a> [null](#provider\_null) | ~> 3.2 |
 
 ## Modules
 
@@ -23,13 +25,13 @@ No modules.
 | [aws_backup_selection.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/backup_selection) | resource |
 | [aws_backup_vault.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/backup_vault) | resource |
 | [aws_backup_vault_notifications.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/backup_vault_notifications) | resource |
-| [aws_s3_bucket.velero](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_lifecycle_configuration.velero](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/s3_bucket_lifecycle_configuration) | resource |
 | [aws_s3_bucket_public_access_block.velero](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/s3_bucket_public_access_block) | resource |
 | [aws_s3_bucket_versioning.velero](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/s3_bucket_versioning) | resource |
 | [aws_sns_topic.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/sns_topic) | resource |
 | [aws_sns_topic_policy.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/sns_topic_policy) | resource |
 | [aws_sns_topic_subscription.email](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/sns_topic_subscription) | resource |
+| [null_resource.velero_bucket](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
 | [aws_iam_role.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/data-sources/iam_role) | data source |
 
 ## Inputs
