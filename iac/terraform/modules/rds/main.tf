@@ -65,7 +65,12 @@ resource "aws_db_instance" "this" {
   skip_final_snapshot     = true # Não criar snapshot ao deletar
 
   # Maintenance
-  maintenance_window         = "sun:03:00-sun:04:00"
+  # Precisa ficar fora do backup_window (03:00-04:00 diário, todo domingo
+  # incluso) — bug real encontrado num apply de verdade (a AWS rejeita com
+  # "InvalidParameterValue: The backup window and maintenance window must
+  # not overlap"; terraform validate/test com mock_provider não pega essa
+  # regra de negócio, só aparece contra a API real).
+  maintenance_window         = "sun:05:00-sun:06:00"
   auto_minor_version_upgrade = true
 
   # Monitoramento - DESABILITADO
