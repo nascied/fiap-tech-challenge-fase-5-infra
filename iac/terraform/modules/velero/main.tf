@@ -10,8 +10,8 @@ resource "helm_release" "velero" {
   namespace        = var.namespace
   create_namespace = true
   replace          = true
-  cleanup_on_fail = true
-  force_update = true
+  cleanup_on_fail  = true
+  force_update     = true
 
   timeout = 600
 
