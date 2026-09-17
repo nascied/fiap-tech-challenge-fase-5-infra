@@ -77,12 +77,30 @@ resource "helm_release" "velero" {
       # "latest" e tags de digest), então isso sempre dá ImagePullBackOff em
       # clusters com versão recente. Bug real encontrado rodando contra um
       # cluster EKS de verdade (terraform validate/test não pega isso, é
-      # comportamento em runtime do próprio chart). "latest" é a única tag
-      # confirmada disponível — kubectl apply de CRD tolera bem client mais
-      # novo que o server, então não é um problema real de compatibilidade.
+      # comportamento em runtime do próprio chart).
+      #
+      # "latest" resolveu o ImagePullBackOff mas trocou o problema por outro:
+      # é kubectl client v1.37.0 (confirmado rodando a imagem), 2 versões minor
+      # à frente do cluster (EKS 1.35) — acima da política de compatibilidade
+      # de skew do Kubernetes (cliente deveria ficar em ±1 do servidor). O Job
+      # passou a falhar com BackoffLimitExceeded logo depois dessa troca (não
+      # confirmado nos logs — o `cleanup_on_fail=true` do release apagou o pod
+      # antes de dar tempo de capturar; hipótese mais forte disponível, não
+      # 100% confirmada).
+      #
+      # Tentativa 1: docker.io/rancher/kubectl:v1.35.6 (tag versionada, bate
+      # com o cluster) — DESCARTADA: confirmado rodando a imagem que ela não
+      # tem /bin/sh (nem find/ls, é minimalista) — o initContainer deste chart
+      # roda `command: [/bin/sh]` explicitamente pra copiar sh+kubectl pro
+      # container principal, então quebra de um jeito ainda mais direto.
+      # Corrigido com docker.io/alpine/k8s:1.35.8 — Alpine de verdade (tem sh
+      # via busybox), tag por versão exata batendo com o cluster. Confirmado
+      # rodando o comando exato do initContainer (`cp $(which sh) /tmp && cp
+      # $(which kubectl) /tmp`) contra essa imagem antes de aplicar.
       kubectl = {
         image = {
-          tag = "latest"
+          repository = "docker.io/alpine/k8s"
+          tag        = "1.35.8"
         }
       }
 
