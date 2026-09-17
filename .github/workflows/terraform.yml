@@ -1,0 +1,207 @@
+name: Terraform IaC
+
+on:
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - "iac/terraform/**"
+  # push:
+  #   branches:
+  #     - dev
+  #   paths:
+  #     - "iac/terraform/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Ação Terraform"
+        required: true
+        default: "plan"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iac/terraform
+
+    env:
+      TF_IN_AUTOMATION: true
+      TF_INPUT: false
+      # Variáveis Terraform sensíveis (var.aws_access_key_id/secret_access_key/
+      # session_token, var.github_token, var.pagerduty_webhook_secret em
+      # variable.tf) — sem default de propósito, nunca versionadas em .tfvars.
+      # TF_VAR_<nome> é o único jeito de popular uma variável Terraform via
+      # ambiente; sem isso, plan/apply/destroy falha com "No value for
+      # required variable". Isso é diferente (e adicional) ao passo "Configura
+      # credenciais AWS" abaixo: aquele só autentica o *provider* AWS via
+      # aws-actions/configure-aws-credentials — não popula essas variáveis do
+      # Terraform, que são consumidas por module.secrets (Secrets Manager) e
+      # module.incident_bridge (Lambda-ponte do self-healing), não pelo
+      # provider. Faltavam todas as 5 aqui antes desta correção.
+      TF_VAR_aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      TF_VAR_aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+      # Token do GitHub (PAT com permissão de repository_dispatch neste repo)
+      # usado pelo Lambda-ponte em runtime — não é o secrets.GITHUB_TOKEN
+      # padrão do Actions (esse é efêmero, válido só durante esta run; o
+      # Lambda precisa de um token persistente pra chamar a API do GitHub a
+      # qualquer momento, disparado pelo PagerDuty, fora do contexto de uma
+      # run). Ver iac/terraform/modules/lambda/README.md.
+      TF_VAR_github_token: ${{ secrets.INCIDENT_BRIDGE_GITHUB_TOKEN }}
+      # Secret de verificação de assinatura da webhook subscription V3 do
+      # PagerDuty (não confundir com PAGERDUTY_API_TOKEN/PAGERDUTY_FROM_EMAIL,
+      # usados pelo incident-response.yml pra outra finalidade — resolver o
+      # incidente via REST API).
+      TF_VAR_pagerduty_webhook_secret: ${{ secrets.PAGERDUTY_WEBHOOK_SECRET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+     
+      - name: Configura credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configura TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Define arquivo tfvars por branch
+        run: |
+          # pull_request usa GITHUB_BASE_REF (branch de destino do PR)
+          # push e workflow_dispatch usam GITHUB_REF_NAME (branch atual)
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BRANCH="${GITHUB_BASE_REF}"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+          fi
+
+          echo "Branch detectada: ${BRANCH}"
+
+          case "${BRANCH}" in
+            dev)
+              ENV="dev"
+              ;;
+            main)
+              ENV="prd"
+              ;;
+            *)
+              echo "❌ Branch não suportada para deploy: ${BRANCH}"
+              exit 1
+              ;;
+          esac
+
+          echo "TF_VARS_FILE=terraform.${ENV}.tfvars" >> "$GITHUB_ENV"
+          echo "DEPLOY_ENV=${ENV}" >> "$GITHUB_ENV"
+
+      - name: Mostra arquivo tfvars selecionado
+        run: |
+          echo "Ambiente: ${DEPLOY_ENV}"
+          echo "Arquivo: ${TF_VARS_FILE}"
+
+      - name: Lint Terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -upgrade -backend-config="backends/${DEPLOY_ENV}.tfbackend"
+          terraform validate
+          tflint --init
+          tflint --recursive
+
+      - name: Testes unitários
+        run: terraform test
+
+      - name: Gera relatório Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: iac/terraform
+          framework: terraform
+          output_format: cli,sarif,json
+          output_file_path: console,results.sarif,checkov-report.json
+          soft_fail: true
+
+      - name: Publica relatório Checkov em tabela
+        if: always()
+        run: |
+          echo "## Relatório Checkov (Terraform) — Ambiente: ${DEPLOY_ENV}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -s checkov-report.json ]; then
+            FAILED=$(jq '[.results.failed_checks[]?] | length' checkov-report.json 2>/dev/null || echo "0")
+            PASSED=$(jq '[.results.passed_checks[]?] | length' checkov-report.json 2>/dev/null || echo "0")
+
+            if [ "${FAILED}" -gt "0" ]; then
+              echo "⚠️ **${FAILED} finding(s) encontrado(s) — revisar antes do apply**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "✅ **Nenhum finding detectado — ${PASSED} checks passaram**" >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Status | Check ID | Severidade | Recurso | Arquivo |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+
+            jq -r '
+              (.results.failed_checks[]? | [
+                "❌ FAILED",
+                (.check_id // "-"),
+                (.severity // "-"),
+                (.resource // "-"),
+                (.file_path // "-")
+              ]),
+              (.results.passed_checks[]? | [
+                "✅ PASSED",
+                (.check_id // "-"),
+                (.severity // "-"),
+                (.resource // "-"),
+                (.file_path // "-")
+              ])
+              | @tsv
+            ' checkov-report.json 2>/dev/null | \
+            while IFS=$'\t' read -r status check_id severity resource file_path; do
+              echo "| ${status} | ${check_id} | ${severity} | ${resource} | ${file_path} |" >> "$GITHUB_STEP_SUMMARY"
+            done
+          else
+            echo "⚠️ **Checkov não gerou relatório JSON**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Terraform Plan
+        if: >-
+          github.event_name == 'pull_request' ||
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && (github.event.inputs.action == 'plan' || github.event.inputs.action == 'apply'))
+        run: terraform plan -var-file="${TF_VARS_FILE}" -out=tfplan
+
+      - name: Terraform Apply
+        # Somente via workflow_dispatch — sem apply automático no push
+        if: github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve tfplan
+
+      # Nota: ao contrário do projeto anterior (ToggleMaster/Fase 3), este workflow
+      # não despacha outputs (ECR/RDS/Redis) pro repositório de serviços depois do
+      # apply. Não é mais necessário: os segredos de app (DATABASE_URL, credenciais
+      # AWS, fila SQS) chegam aos pods via AWS Secrets Manager + Secrets Store CSI
+      # Driver (ver module.secretsmanager e helm/{donation,volunteer}-service/
+      # templates/secretproviderclass.yaml no repo gitops) — nada disso passa por
+      # values.yaml nem por este workflow. O único valor que ainda precisa ir do
+      # Terraform pro GitOps é a URL de cada repositório ECR pra image.repository,
+      # e isso é resolvido dinamicamente pela própria pipeline de CI/CD de cada
+      # serviço no momento do push da imagem (aws-actions/amazon-ecr-login), não
+      # aqui — ver fiap-tech-challenge-fase-5-services/.github/workflows/ci-*.yaml.
+
+      - name: Terraform Destroy
+        # Somente via workflow_dispatch com branch como fonte da verdade do ambiente
+        if: github.event.inputs.action == 'destroy'
+        run: terraform destroy -var-file="${TF_VARS_FILE}" -auto-approve

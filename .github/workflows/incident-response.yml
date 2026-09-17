@@ -1,0 +1,50 @@
+name: Incident Response (self-healing)
+
+# Disparado pela Lambda-ponte (iac/terraform/modules/lambda) quando o
+# PagerDuty recebe um incidente (webhook V3 incident.triggered). Ver
+# aiops/README.md para o fluxo completo e o que esse workflow assume.
+on:
+  repository_dispatch:
+    types: [pagerduty-incident]
+
+jobs:
+  respond:
+    name: Analisar incidente e decidir ação (Claude)
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instala dependências
+        run: pip install -r aiops/requirements.txt
+
+      - name: Configura credenciais AWS
+        # Sessão AWS Academy — precisa estar válida (~4h) no momento em que
+        # este workflow dispara. Ver docs/drp/DRP.md e scripts/README.md
+        # (mesma limitação já documentada pro terraform.yml).
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Configura kubeconfig do cluster EKS
+        run: aws eks update-kubeconfig --name "${{ secrets.EKS_CLUSTER_NAME }}" --region us-east-1
+
+      - name: Executa o agente de self-healing
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          INCIDENT_SLACK_WEBHOOK_URL: ${{ secrets.INCIDENT_SLACK_WEBHOOK_URL }}
+          PAGERDUTY_API_TOKEN: ${{ secrets.PAGERDUTY_API_TOKEN }}
+          PAGERDUTY_FROM_EMAIL: ${{ secrets.PAGERDUTY_FROM_EMAIL }}
+          INCIDENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: python aiops/incident_response.py

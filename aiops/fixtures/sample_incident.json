@@ -1,0 +1,20 @@
+{
+  "pagerduty_event": {
+    "event": {
+      "id": "5ac64822-4e30-4e5e-aa5c-1234567890ab",
+      "event_type": "incident.triggered",
+      "resource_type": "incident",
+      "occurred_at": "2026-09-13T14:00:00Z",
+      "data": {
+        "id": "PXXXXXX",
+        "type": "incident",
+        "status": "triggered",
+        "title": "SLOErrorBudgetBurnFast (donation-service)",
+        "summary": "donation-service queimando o error budget de disponibilidade rápido demais — taxa de erro 5xx nos últimos 5m consumindo o budget de 30d a mais de 14x o ritmo sustentável.",
+        "service": {
+          "summary": "SolidaryTech - donation-service"
+        }
+      }
+    }
+  }
+}
