@@ -104,7 +104,6 @@ resource "null_resource" "velero_bucket" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      set -euo pipefail
       if aws s3api head-bucket --bucket "${self.triggers.bucket_name}" 2>/dev/null; then
         echo "Bucket ${self.triggers.bucket_name} já existe, nada a fazer."
       else
