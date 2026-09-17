@@ -68,6 +68,21 @@ resource "helm_release" "velero" {
         }
       }
 
+      # O Job upgrade-crds do chart usa uma imagem kubectl cuja tag, por padrão,
+      # é derivada da versão do cluster (ex.: "1.35") — mas a Bitnami parou de
+      # publicar tags versionadas em docker.io/bitnami/kubectl (só existe mais
+      # "latest" e tags de digest), então isso sempre dá ImagePullBackOff em
+      # clusters com versão recente. Bug real encontrado rodando contra um
+      # cluster EKS de verdade (terraform validate/test não pega isso, é
+      # comportamento em runtime do próprio chart). "latest" é a única tag
+      # confirmada disponível — kubectl apply de CRD tolera bem client mais
+      # novo que o server, então não é um problema real de compatibilidade.
+      kubectl = {
+        image = {
+          tag = "latest"
+        }
+      }
+
       snapshotsEnabled = true
 
       # node-agent (backup a nível de filesystem via restic/kopia): cobre
