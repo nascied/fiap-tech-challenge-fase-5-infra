@@ -1,0 +1,12 @@
+#-----------------------------------
+# Elastic IPs para NAT Gateways
+#-----------------------------------
+
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = element(aws_subnet.public, 0).id
+
+  tags = { Name = var.aws_vpc.nat_gateway_name }
+
+  depends_on = [aws_internet_gateway.this]
+}
