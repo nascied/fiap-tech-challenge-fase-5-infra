@@ -25,12 +25,12 @@ output "sns_topic_arn" {
 
 output "velero_bucket_name" {
   description = "Nome do bucket S3 usado pelo Velero"
-  value       = var.velero_bucket_name
+  value       = local.velero_bucket_name
   depends_on  = [null_resource.velero_bucket]
 }
 
 output "velero_bucket_arn" {
   description = "ARN do bucket S3 usado pelo Velero"
-  value       = "arn:aws:s3:::${var.velero_bucket_name}"
+  value       = "arn:aws:s3:::${local.velero_bucket_name}"
   depends_on  = [null_resource.velero_bucket]
 }

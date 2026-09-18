@@ -94,12 +94,12 @@ resource "aws_backup_vault_notifications" "this" {
 # create-bucket`) num `null_resource` evita esse Read por completo. Os 3
 # recursos de configuração abaixo (versioning/public-access-block/lifecycle)
 # são tipos separados, com Read próprio que não toca Object Lock — continuam
-# nativos, só passam a referenciar `var.velero_bucket_name` (string) em vez de
-# um atributo do recurso removido, com `depends_on` explícito pra manter a
-# ordem de criação.
+# nativos, só passam a referenciar `local.velero_bucket_name` (string, já com
+# sufixo do account_id — ver locals.tf) em vez de um atributo do recurso
+# removido, com `depends_on` explícito pra manter a ordem de criação.
 resource "null_resource" "velero_bucket" {
   triggers = {
-    bucket_name = var.velero_bucket_name
+    bucket_name = local.velero_bucket_name
   }
 
   provisioner "local-exec" {
@@ -119,7 +119,7 @@ resource "null_resource" "velero_bucket" {
 }
 
 resource "aws_s3_bucket_versioning" "velero" {
-  bucket = var.velero_bucket_name
+  bucket = local.velero_bucket_name
 
   versioning_configuration {
     status = "Enabled"
@@ -129,7 +129,7 @@ resource "aws_s3_bucket_versioning" "velero" {
 }
 
 resource "aws_s3_bucket_public_access_block" "velero" {
-  bucket = var.velero_bucket_name
+  bucket = local.velero_bucket_name
 
   block_public_acls       = true
   block_public_policy     = true
@@ -140,7 +140,7 @@ resource "aws_s3_bucket_public_access_block" "velero" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "velero" {
-  bucket = var.velero_bucket_name
+  bucket = local.velero_bucket_name
 
   rule {
     id     = "expire-old-backups"

@@ -9,6 +9,14 @@ resource "helm_release" "velero" {
   version          = var.chart_version
   namespace        = var.namespace
   create_namespace = true
+  # Depois de várias tentativas falhas (ImagePullBackOff/BackoffLimitExceeded
+  # enquanto corrigíamos a imagem do kubectl.upgrade-crds), o Helm mantém o
+  # histórico do release "velero" mesmo com o pre-install hook falhando —
+  # sem "replace", a próxima tentativa é recusada com "cannot re-use a name
+  # that is still in use". cleanup_on_fail evita reacumular esse mesmo estado
+  # se esta tentativa também falhar.
+  replace         = true
+  cleanup_on_fail = true
 
   timeout = 600
 

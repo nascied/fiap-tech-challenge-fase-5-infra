@@ -32,6 +32,7 @@ No modules.
 | [aws_sns_topic_policy.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/sns_topic_policy) | resource |
 | [aws_sns_topic_subscription.email](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/resources/sns_topic_subscription) | resource |
 | [null_resource.velero_bucket](https://registry.terraform.io/providers/hashicorp/null/latest/docs/resources/resource) | resource |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.this](https://registry.terraform.io/providers/hashicorp/aws/6.44.0/docs/data-sources/iam_role) | data source |
 
 ## Inputs
