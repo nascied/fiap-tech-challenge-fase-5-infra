@@ -8,9 +8,17 @@
 # senha aleatória compartilhada) automaticamente, em vez de deixar isso como
 # placeholder manual no values.yaml do Helm.
 #
+# recovery_window_in_days = 0 em todos: sem isso, um "terraform destroy"
+# deixa o nome do secret "agendado pra deleção" (padrão AWS: 30 dias de
+# recovery window) e o "apply" seguinte falha com InvalidRequestException
+# ("already scheduled for deletion") até alguém rodar um
+# force-delete-without-recovery manual. Ambiente de hackathon com
+# destroy/apply frequente não precisa dessa rede de segurança.
+#
 
 resource "aws_secretsmanager_secret" "donation_service" {
-  name = "${var.name_prefix}-donation-service"
+  name                    = "${var.name_prefix}-donation-service"
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "donation_service" {
@@ -26,7 +34,8 @@ resource "aws_secretsmanager_secret_version" "donation_service" {
 }
 
 resource "aws_secretsmanager_secret" "volunteer_service" {
-  name = "${var.name_prefix}-volunteer-service"
+  name                    = "${var.name_prefix}-volunteer-service"
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "volunteer_service" {
@@ -40,7 +49,8 @@ resource "aws_secretsmanager_secret_version" "volunteer_service" {
 }
 
 resource "aws_secretsmanager_secret" "ngo_service" {
-  name = "${var.name_prefix}-ngo-service"
+  name                    = "${var.name_prefix}-ngo-service"
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "ngo_service" {
