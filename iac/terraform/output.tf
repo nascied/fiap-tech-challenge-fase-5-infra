@@ -215,22 +215,33 @@ output "velero_release_status" {
 }
 
 #----------------------------
-# Secrets Manager (CSI Driver)
+# Secrets Manager
 #----------------------------
 
 output "donation_service_secret_name" {
   value       = module.secrets.donation_service_secret_name
-  description = "Nome do secret do donation-service no Secrets Manager (objectName do SecretProviderClass)"
-}
-
-output "volunteer_service_secret_name" {
-  value       = module.secrets.volunteer_service_secret_name
-  description = "Nome do secret do volunteer-service no Secrets Manager (objectName do SecretProviderClass)"
+  description = "Nome do secret do donation-service no AWS Secrets Manager"
 }
 
 output "ngo_service_secret_name" {
   value       = module.secrets.ngo_service_secret_name
-  description = "Nome do secret do ngo-service no Secrets Manager (objectName do SecretProviderClass)"
+  description = "Nome do secret do ngo-service no AWS Secrets Manager"
+}
+
+#----------------------------------------------------------
+# Secrets do Kubernetes (module.k8s_secrets — ver comentário
+# em modules/k8s-secrets/main.tf: sidesteps o bloqueio de
+# IRSA/Pod Identity do CSI Driver pro donation-service/ngo-service)
+#----------------------------------------------------------
+
+output "k8s_donation_service_secret_name" {
+  value       = module.k8s_secrets.donation_service_secret_name
+  description = "Nome do Secret nativo do Kubernetes com DATABASE_URL/AWS_SQS_URL do donation-service"
+}
+
+output "k8s_ngo_service_secret_name" {
+  value       = module.k8s_secrets.ngo_service_secret_name
+  description = "Nome do Secret nativo do Kubernetes com DATABASE_URL do ngo-service"
 }
 
 #----------------------------

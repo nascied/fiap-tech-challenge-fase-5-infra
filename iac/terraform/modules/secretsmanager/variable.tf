@@ -33,32 +33,3 @@ variable "ngo_database_url" {
   type        = string
   sensitive   = true
 }
-
-# --- credenciais AWS (Academy: sessão temporária STS, não IAM user permanente) ---
-#
-# Em conta AWS real, o caminho correto é IRSA (ver comentário no
-# templates/serviceaccount.yaml de cada chart) — essas variáveis existem só
-# porque a conta Academy não permite criar a IAM role que o IRSA exige, e o
-# usuário optou por trazer credenciais explícitas via Secrets Manager mesmo
-# assim, em vez de depender só do fallback de instance profile do node (LabRole)
-# via IMDS, que também funcionaria e é o que module.velero já usa.
-#
-# São as MESMAS credenciais de sessão do `aws configure`/environment do
-# Academy — temporárias (~4h). Precisam ser re-passadas (terraform apply de
-# novo) toda vez que a sessão expirar; não há como isso ser permanente numa
-# conta Academy.
-
-variable "aws_access_key_id" {
-  type      = string
-  sensitive = true
-}
-
-variable "aws_secret_access_key" {
-  type      = string
-  sensitive = true
-}
-
-variable "aws_session_token" {
-  type      = string
-  sensitive = true
-}

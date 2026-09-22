@@ -24,13 +24,11 @@ na ordem certa. Também dá pra usar via `make` (ver `Makefile` na raiz do repo)
 | 8 | `08-destroy.sh <dev\|prd>` | `terraform destroy`, com dupla confirmação (nome do ambiente + revisão do plano) | Sim |
 | — | `run-all.sh <dev\|prd>` | Roda 0→7 em sequência | Sim |
 
-`lib/common.sh` concentra as funções compartilhadas (log/warn/die, validação de ambiente, checagem de sessão, injeção de credenciais como `TF_VAR_*`) — não é executado direto.
+`lib/common.sh` concentra as funções compartilhadas (log/warn/die, validação de ambiente, checagem de sessão) — não é executado direto.
 
 ## Credenciais AWS Academy → `TF_VAR_*`
 
-`var.aws_access_key_id`/`aws_secret_access_key`/`aws_session_token` (usadas por `module.secrets` para popular o Secrets Manager, ver `iac/terraform/variable.tf`) **não têm default e não devem ir em `.tfvars`**. Os scripts que precisam delas (`05-plan.sh`, `08-destroy.sh`) resolvem a sessão atual com `aws configure export-credentials` e exportam como `TF_VAR_aws_access_key_id` etc. na hora — nada é escrito em disco. Se a sessão expirar no meio do trabalho, reexporte as credenciais da AWS Academy no shell e rode o script de novo.
-
-**`var.github_token`/`var.pagerduty_webhook_secret` (module.incident_bridge) não são cobertas por nenhum script** — diferente das credenciais AWS acima, que são resolvidas automaticamente. Rodando localmente (em vez de pela pipeline `.github/workflows/terraform.yml`, que já resolve as duas via os secrets `INCIDENT_BRIDGE_GITHUB_TOKEN`/`PAGERDUTY_WEBHOOK_SECRET` do repositório), exporte manualmente antes de `05-plan.sh`/`06-apply.sh`:
+`var.github_token`/`var.pagerduty_webhook_secret` (module.incident_bridge) — únicas variáveis sensíveis sem default hoje — **não são cobertas por nenhum script**, precisam ser exportadas manualmente antes de `05-plan.sh`/`06-apply.sh` ao rodar localmente (a pipeline `.github/workflows/terraform.yml` já resolve as duas via os secrets `INCIDENT_BRIDGE_GITHUB_TOKEN`/`PAGERDUTY_WEBHOOK_SECRET` do repositório):
 
 ```bash
 export TF_VAR_github_token="ghp_..."             # PAT com permissão de repository_dispatch neste repo

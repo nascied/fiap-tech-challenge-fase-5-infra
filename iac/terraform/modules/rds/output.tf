@@ -32,9 +32,15 @@ output "aws_db_instance_master_user" {
 
 output "aws_db_instance_connection_strings" {
   description = "Lista de connection strings dos bancos RDS"
+  # urlencode() na senha: random_password.this permite caracteres reservados em URI
+  # (override_special = "!#$%&*()-_=+[]{}<>:?", em main.tf) — sem isso, um "%" sorteado
+  # (não seguido de 2 dígitos hex) quebra o parsing da URI em qualquer client (psql,
+  # libpq, etc.) com "invalid percent-encoded token". Bug probabilístico: só se
+  # manifesta quando o gerador escolhe um desses caracteres. Username não passa por
+  # urlencode() porque não é gerado aleatoriamente (vem fixo do .tfvars).
   value = [
     for db in aws_db_instance.this :
-    "postgresql://${db.username}:${db.password}@${db.address}:${db.port}/${db.db_name}"
+    "postgresql://${db.username}:${urlencode(db.password)}@${db.address}:${db.port}/${db.db_name}"
   ]
   sensitive = true
 }

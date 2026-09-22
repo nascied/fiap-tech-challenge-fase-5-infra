@@ -34,20 +34,23 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       TF_INPUT: false
-      # Variáveis Terraform sensíveis (var.aws_access_key_id/secret_access_key/
-      # session_token, var.github_token, var.pagerduty_webhook_secret em
-      # variable.tf) — sem default de propósito, nunca versionadas em .tfvars.
+      # Variáveis Terraform sensíveis (var.github_token, var.pagerduty_webhook_secret
+      # em variable.tf) — sem default de propósito, nunca versionadas em .tfvars.
       # TF_VAR_<nome> é o único jeito de popular uma variável Terraform via
       # ambiente; sem isso, plan/apply/destroy falha com "No value for
-      # required variable". Isso é diferente (e adicional) ao passo "Configura
-      # credenciais AWS" abaixo: aquele só autentica o *provider* AWS via
-      # aws-actions/configure-aws-credentials — não popula essas variáveis do
-      # Terraform, que são consumidas por module.secrets (Secrets Manager) e
-      # module.incident_bridge (Lambda-ponte do self-healing), não pelo
-      # provider. Faltavam todas as 5 aqui antes desta correção.
-      TF_VAR_aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      TF_VAR_aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      TF_VAR_aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+      # required variable". Isso é diferente do passo "Configura credenciais
+      # AWS" abaixo: aquele autentica o *provider* AWS via
+      # aws-actions/configure-aws-credentials — não tem relação com essas
+      # variáveis do Terraform, consumidas por module.incident_bridge
+      # (Lambda-ponte do self-healing).
+      #
+      # Sem TF_VAR_aws_access_key_id/secret_access_key/session_token aqui
+      # (removidas numa sessão posterior): essas variáveis existiam só pra
+      # popular credenciais AWS estáticas no Secrets Manager (module.secrets),
+      # que nunca foram necessárias pro código das apps — confirmado
+      # empiricamente que a cadeia padrão de credenciais do SDK resolve via
+      # IMDS -> instance profile do node -> LabRole, sem nenhuma credencial
+      # explícita.
       # Token do GitHub (PAT com permissão de repository_dispatch neste repo)
       # usado pelo Lambda-ponte em runtime — não é o secrets.GITHUB_TOKEN
       # padrão do Actions (esse é efêmero, válido só durante esta run; o

@@ -8,7 +8,6 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 require_terraform
 require_env "${1:-}"
 check_aws_session
-export_tf_var_credentials
 
 cd "$TF_DIR"
 

@@ -110,11 +110,25 @@ module "secrets" {
   donation_sqs_queue_url = module.sqs.sqs_queue_url
   ngo_database_url       = module.db.aws_db_instance_connection_strings[1]
 
-  aws_access_key_id     = var.aws_access_key_id
-  aws_secret_access_key = var.aws_secret_access_key
-  aws_session_token     = var.aws_session_token
-
   depends_on = [module.db, module.sqs]
+}
+
+# Opção 2 pro bloqueio de IRSA/Pod Identity do CSI Driver (donation-service/
+# ngo-service não conseguem sincronizar o secret via Secrets Store CSI Driver
+# nesta conta — ver comentário completo em modules/k8s-secrets/main.tf e
+# CLAUDE.md). Escreve o mesmo DATABASE_URL/AWS_SQS_URL diretamente como
+# Secret nativo do Kubernetes, sem depender de IAM role associada a
+# ServiceAccount nenhuma.
+module "k8s_secrets" {
+  source = "./modules/k8s-secrets"
+
+  namespace = "fiap-tc-f5"
+
+  donation_database_url  = module.db.aws_db_instance_connection_strings[0]
+  donation_sqs_queue_url = module.sqs.sqs_queue_url
+  ngo_database_url       = module.db.aws_db_instance_connection_strings[1]
+
+  depends_on = [module.eks, module.db, module.sqs]
 }
 
 # ITSM/AIOps: self-healing de incidentes (ver aiops/README.md na raiz do

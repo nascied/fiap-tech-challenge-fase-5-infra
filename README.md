@@ -199,7 +199,6 @@ Lista completa em `iac/terraform/variable.tf`.
 | `environment` | `string` | | `Development` ou `Production` — vira a tag `Environment` em todo recurso (FinOps) |
 | `backup_vault_name` / `backup_schedule_cron` / `backup_retention_days` / `backup_notification_email` | — | | Parâmetros do AWS Backup (DRP) — ver `docs/drp/DRP.md` |
 | `velero_namespace` / `velero_chart_version` / `velero_bucket_name` / `velero_schedule_cron` / `velero_included_namespaces` | — | | Parâmetros do Velero (DRP) |
-| `aws_access_key_id` / `aws_secret_access_key` / `aws_session_token` | `string` | ✅ | Credenciais de sessão da AWS Academy — populam o Secrets Manager pro CSI Driver. **Nunca em `.tfvars`**, passar via `TF_VAR_*` (ver `scripts/README.md`) |
 | `github_repo` | `string` | | Repo (`owner/repo`) que recebe o `repository_dispatch` do self-healing (default já aponta pra este repo) |
 | `github_token` | `string` | ✅ | Token do GitHub com permissão de `repository_dispatch` — **nunca em `.tfvars`** |
 | `pagerduty_webhook_secret` | `string` | ✅ | Secret de verificação de assinatura do webhook V3 do PagerDuty — **nunca em `.tfvars`** |
@@ -234,7 +233,7 @@ aws_vpc = {
 }
 ```
 
-As variáveis sensíveis (`aws_access_key_id`/`aws_secret_access_key`/`aws_session_token`, `github_token`, `pagerduty_webhook_secret`) **nunca vão em `.tfvars`** — são resolvidas na hora do `apply` (ver `scripts/README.md` e `iac/terraform/modules/lambda/README.md`).
+As variáveis sensíveis (`github_token`, `pagerduty_webhook_secret`) **nunca vão em `.tfvars`** — são resolvidas na hora do `apply` (ver `scripts/README.md` e `iac/terraform/modules/lambda/README.md`).
 
 ## Modelo de Uso manual
 
@@ -308,7 +307,7 @@ Configure os seguintes secrets no repositório GitHub em `Settings > Secrets and
 
 | Nome | Descrição |
 |------|-----------|
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` | Credenciais de sessão da AWS Academy. Usadas **duas vezes** no workflow: autenticam o provider AWS (`aws-actions/configure-aws-credentials`) **e** populam `var.aws_access_key_id`/`aws_secret_access_key`/`aws_session_token` via `TF_VAR_*` (consumidas por `module.secrets`, não pelo provider) — as duas coisas são independentes, não dá pra assumir que uma cobre a outra. |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` | Credenciais de sessão da AWS Academy. Autenticam só o *provider* AWS (`aws-actions/configure-aws-credentials`), pra rodar `plan`/`apply`/`destroy` — não populam nenhuma variável Terraform (não há mais credencial AWS estática armazenada no Secrets Manager, ver seção do `module.secrets` acima). |
 | `INCIDENT_BRIDGE_GITHUB_TOKEN` | Token do GitHub (PAT com permissão de `repository_dispatch` neste repo) — popula `var.github_token` via `TF_VAR_github_token`. Usado pelo Lambda-ponte do self-healing em runtime, **não** é o `secrets.GITHUB_TOKEN` padrão do Actions (esse é efêmero, só vale durante a run atual; o Lambda precisa de um token persistente, chamável a qualquer momento pelo PagerDuty). Ver [`iac/terraform/modules/lambda/README.md`](iac/terraform/modules/lambda/README.md). |
 | `PAGERDUTY_WEBHOOK_SECRET` | Secret de verificação de assinatura da webhook subscription V3 do PagerDuty — popula `var.pagerduty_webhook_secret` via `TF_VAR_pagerduty_webhook_secret`. Não confundir com `PAGERDUTY_API_TOKEN`/`PAGERDUTY_FROM_EMAIL` (abaixo), que servem pra outra coisa. |
 
@@ -318,7 +317,7 @@ O backend remoto (bucket S3, caminho do state por ambiente) **não é secret** �
 
 Secrets adicionais só são necessários pro workflow de self-healing (`incident-response.yml`) — `ANTHROPIC_API_KEY`, `EKS_CLUSTER_NAME`, `INCIDENT_SLACK_WEBHOOK_URL`, `PAGERDUTY_API_TOKEN`/`PAGERDUTY_FROM_EMAIL` — ver [`aiops/README.md`](aiops/README.md).
 
-**Rodando localmente (`scripts/`) em vez da pipeline**: `05-plan.sh`/`06-apply.sh` só resolvem as 3 credenciais AWS automaticamente (via `aws configure export-credentials`, ver `scripts/README.md`). `TF_VAR_github_token` e `TF_VAR_pagerduty_webhook_secret` continuam precisando ser exportados manualmente no shell antes de rodar os scripts — não tem "secret do GitHub" fora da pipeline.
+**Rodando localmente (`scripts/`) em vez da pipeline**: `TF_VAR_github_token` e `TF_VAR_pagerduty_webhook_secret` precisam ser exportados manualmente no shell antes de rodar os scripts (`05-plan.sh`/`06-apply.sh`) — não tem "secret do GitHub" fora da pipeline. Fora isso, só é preciso ter uma sessão AWS Academy válida no shell (`aws sts get-caller-identity` funcionando) — nenhum script resolve/injeta credencial AWS como variável Terraform, já que não existe mais nenhuma no código (ver `scripts/README.md`).
 
 ### Exemplo de workflow
 
@@ -375,20 +374,23 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       TF_INPUT: false
-      # Variáveis Terraform sensíveis (var.aws_access_key_id/secret_access_key/
-      # session_token, var.github_token, var.pagerduty_webhook_secret em
-      # variable.tf) — sem default de propósito, nunca versionadas em .tfvars.
+      # Variáveis Terraform sensíveis (var.github_token, var.pagerduty_webhook_secret
+      # em variable.tf) — sem default de propósito, nunca versionadas em .tfvars.
       # TF_VAR_<nome> é o único jeito de popular uma variável Terraform via
       # ambiente; sem isso, plan/apply/destroy falha com "No value for
-      # required variable". Isso é diferente (e adicional) ao passo "Configura
-      # credenciais AWS" abaixo: aquele só autentica o *provider* AWS via
-      # aws-actions/configure-aws-credentials — não popula essas variáveis do
-      # Terraform, que são consumidas por module.secrets (Secrets Manager) e
-      # module.incident_bridge (Lambda-ponte do self-healing), não pelo
-      # provider. Faltavam todas as 5 aqui antes desta correção.
-      TF_VAR_aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      TF_VAR_aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      TF_VAR_aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+      # required variable". Isso é diferente do passo "Configura credenciais
+      # AWS" abaixo: aquele autentica o *provider* AWS via
+      # aws-actions/configure-aws-credentials — não tem relação com essas
+      # variáveis do Terraform, consumidas por module.incident_bridge
+      # (Lambda-ponte do self-healing).
+      #
+      # Sem TF_VAR_aws_access_key_id/secret_access_key/session_token aqui
+      # (removidas numa sessão posterior): essas variáveis existiam só pra
+      # popular credenciais AWS estáticas no Secrets Manager (module.secrets),
+      # que nunca foram necessárias pro código das apps — confirmado
+      # empiricamente que a cadeia padrão de credenciais do SDK resolve via
+      # IMDS -> instance profile do node -> LabRole, sem nenhuma credencial
+      # explícita.
       # Token do GitHub (PAT com permissão de repository_dispatch neste repo)
       # usado pelo Lambda-ponte em runtime — não é o secrets.GITHUB_TOKEN
       # padrão do Actions (esse é efêmero, válido só durante esta run; o
@@ -412,7 +414,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: "us-east-1"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -569,7 +571,7 @@ Lista completa em `iac/terraform/output.tf`. Os principais:
 | `sqs_queue_url` / `aws_dynamodb_table_name` | Mensageria e NoSQL |
 | `argocd_release_status` | Status do release Helm do ArgoCD |
 | `backup_vault_arn` / `velero_bucket_name` / `velero_release_status` | DRP (AWS Backup + Velero) |
-| `donation_service_secret_name` / `volunteer_service_secret_name` / `ngo_service_secret_name` | Secrets Manager (CSI Driver) |
+| `donation_service_secret_name` / `ngo_service_secret_name` | Secrets Manager (CSI Driver) |
 | `incident_bridge_function_url` | URL da Lambda-ponte — configurar como destino do webhook V3 no PagerDuty (ver `aiops/README.md`) |
 
 Não existe mais output de ElastiCache/Redis — `module.redis` não é instanciado (ver nota na seção "Recursos Provisionados").

@@ -44,19 +44,3 @@ check_aws_session() {
   fi
   log "Sessão AWS ativa: $(aws sts get-caller-identity --query Arn --output text)"
 }
-
-# Resolve as credenciais efetivas da sessão atual (env vars/profile já
-# exportados pelo usuário a partir do AWS Academy) e injeta como TF_VAR_* —
-# consumidas por var.aws_access_key_id/secret/session_token (module.secrets,
-# ver iac/terraform/variable.tf). Nunca grava nada em disco.
-export_tf_var_credentials() {
-  require_aws_cli
-  local creds
-  creds="$(aws configure export-credentials --format env 2>/dev/null)" \
-    || die "Não foi possível resolver credenciais AWS via 'aws configure export-credentials'. Confirme que a sessão Academy está exportada neste shell."
-  eval "$creds"
-
-  export TF_VAR_aws_access_key_id="${AWS_ACCESS_KEY_ID:?credencial AWS_ACCESS_KEY_ID vazia}"
-  export TF_VAR_aws_secret_access_key="${AWS_SECRET_ACCESS_KEY:?credencial AWS_SECRET_ACCESS_KEY vazia}"
-  export TF_VAR_aws_session_token="${AWS_SESSION_TOKEN:?credencial AWS_SESSION_TOKEN vazia}"
-}

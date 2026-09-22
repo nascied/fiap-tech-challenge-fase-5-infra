@@ -39,12 +39,9 @@
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_aws_access_key_id"></a> [aws\_access\_key\_id](#input\_aws\_access\_key\_id) | Access key da sessão AWS Academy — usada para popular o Secrets Manager (não versionar valor real) | `string` | n/a | yes |
 | <a name="input_aws_dynamodb_table_name"></a> [aws\_dynamodb\_table\_name](#input\_aws\_dynamodb\_table\_name) | Nome da tabela DynamoDB | `string` | n/a | yes |
 | <a name="input_aws_eks_cluster_version"></a> [aws\_eks\_cluster\_version](#input\_aws\_eks\_cluster\_version) | n/a | `string` | n/a | yes |
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | Região AWS onde a infra é provisionada — usada pelo module.velero (não altera o provider aws, que segue as credenciais ambiente/CLI) | `string` | `"us-east-1"` | no |
-| <a name="input_aws_secret_access_key"></a> [aws\_secret\_access\_key](#input\_aws\_secret\_access\_key) | Secret key da sessão AWS Academy — usada para popular o Secrets Manager (não versionar valor real) | `string` | n/a | yes |
-| <a name="input_aws_session_token"></a> [aws\_session\_token](#input\_aws\_session\_token) | Session token da sessão AWS Academy (credenciais STS temporárias) — usada para popular o Secrets Manager (não versionar valor real) | `string` | n/a | yes |
 | <a name="input_aws_sqs_queue_name"></a> [aws\_sqs\_queue\_name](#input\_aws\_sqs\_queue\_name) | n/a | `string` | n/a | yes |
 | <a name="input_aws_vpc"></a> [aws\_vpc](#input\_aws\_vpc) | Configuração de rede AWS | <pre>object({<br/>    name                     = string<br/>    cidr_block               = string<br/>    internet_gateway_name    = string<br/>    nat_gateway_name         = string<br/>    public_route_table_name  = string<br/>    private_route_table_name = string<br/>    public_subnets = list(object({<br/>      name                    = string<br/>      cidr_block              = string<br/>      availability_zone       = string<br/>      map_public_ip_on_launch = bool<br/>    }))<br/>    private_subnets = list(object({<br/>      name                    = string<br/>      cidr_block              = string<br/>      availability_zone       = string<br/>      map_public_ip_on_launch = bool<br/>    }))<br/>  })</pre> | n/a | yes |
 | <a name="input_backup_notification_email"></a> [backup\_notification\_email](#input\_backup\_notification\_email) | E-mail para notificação de falha/sucesso de backup e restore. Vazio desativa a inscrição SNS | `string` | `""` | no |
@@ -104,5 +101,4 @@
 | <a name="output_sqs_queue_url"></a> [sqs\_queue\_url](#output\_sqs\_queue\_url) | URL da fila SQS |
 | <a name="output_velero_bucket_name"></a> [velero\_bucket\_name](#output\_velero\_bucket\_name) | Bucket S3 usado pelo Velero para backups do cluster EKS |
 | <a name="output_velero_release_status"></a> [velero\_release\_status](#output\_velero\_release\_status) | Status do release Helm do Velero |
-| <a name="output_volunteer_service_secret_name"></a> [volunteer\_service\_secret\_name](#output\_volunteer\_service\_secret\_name) | Nome do secret do volunteer-service no Secrets Manager (objectName do SecretProviderClass) |
 | <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | ID da VPC |
