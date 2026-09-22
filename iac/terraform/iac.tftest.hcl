@@ -14,6 +14,19 @@ override_data {
   }
 }
 
+# Sem isso, "count" em kubernetes_namespace.this (module.k8s_secrets) falha
+# com "Invalid count argument": o mock_provider por padrão trata o resultado
+# de data.kubernetes_all_namespaces como só conhecido em apply, e count exige
+# um valor conhecido em plan. Mesma limitação apareceria de verdade (fora do
+# teste) se esse data source dependesse de um provider cuja config só fica
+# pronta durante o próprio apply — ver ressalva no CLAUDE.md.
+override_data {
+  target = module.k8s_secrets.data.kubernetes_all_namespaces.this
+  values = {
+    namespaces = []
+  }
+}
+
 variables {
   aws_vpc = {
     name                     = "fiap-tc-f5-vpc"

@@ -1,6 +1,7 @@
 output "namespace" {
   description = "Namespace onde os secrets foram criados"
-  value       = kubernetes_namespace.this.metadata[0].name
+  value       = var.namespace
+  depends_on  = [kubernetes_namespace.this]
 }
 
 output "donation_service_secret_name" {

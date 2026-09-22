@@ -24,23 +24,30 @@
 # awsSecrets (CSI) por externalSecret (Secret pré-existente, gerenciado por
 # fora do Helm release) nos values.yaml desses 2 charts.
 #
-# Namespace criado aqui (não só pelo CreateNamespace=true do ArgoCD) porque
-# um kubernetes_secret precisa que o namespace já exista no momento do
-# apply — o `terraform apply` roda ANTES do primeiro sync do ArgoCD.
-# Idempotente: quando o ArgoCD sincronizar depois com CreateNamespace=true,
-# só vê que o namespace já existe e segue em frente, sem conflito.
-
+# Namespace via resource condicional (count + data.kubernetes_all_namespaces),
+# não null_resource/kubectl: o `fiap-tc-f5` pode já existir no cluster numa
+# reaplicação (criado antes por um `kubectl apply -f argocd/root.yaml` do
+# ArgoCD, fora do state do Terraform) — criar de novo sem essa checagem
+# falharia com "already exists". `count` fica 0 quando o namespace já existe
+# na lista retornada pelo data source, 1 quando precisa ser criado.
 resource "kubernetes_namespace" "this" {
   count = contains(data.kubernetes_all_namespaces.this.namespaces, var.namespace) ? 0 : 1
+
   metadata {
     name = var.namespace
   }
 }
 
+# Os 2 Secrets usam var.namespace (string) direto, não um atributo do
+# kubernetes_namespace.this — o nome do namespace já é conhecido de
+# antemão independente de o Terraform tê-lo criado ou não (count 0 ou 1).
+# depends_on garante a ordem (namespace antes do secret) mesmo quando
+# count = 0 (referenciar o resource inteiro em depends_on é válido
+# independente do count resolver pra 0 ou 1 instância).
 resource "kubernetes_secret" "donation_service" {
   metadata {
     name      = "donation-service-secret"
-    namespace = kubernetes_namespace.this[count.index]
+    namespace = var.namespace
   }
 
   data = {
@@ -49,12 +56,14 @@ resource "kubernetes_secret" "donation_service" {
   }
 
   type = "Opaque"
+
+  depends_on = [kubernetes_namespace.this]
 }
 
 resource "kubernetes_secret" "ngo_service" {
   metadata {
     name      = "ngo-service-secret"
-    namespace = kubernetes_namespace.this[count.index]
+    namespace = var.namespace
   }
 
   data = {
@@ -62,4 +71,6 @@ resource "kubernetes_secret" "ngo_service" {
   }
 
   type = "Opaque"
+
+  depends_on = [kubernetes_namespace.this]
 }
