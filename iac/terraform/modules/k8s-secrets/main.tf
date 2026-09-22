@@ -40,7 +40,7 @@ resource "kubernetes_namespace" "this" {
 resource "kubernetes_secret" "donation_service" {
   metadata {
     name      = "donation-service-secret"
-    namespace = kubernetes_namespace.this.metadata[0].name
+    namespace = kubernetes_namespace.this[count.index]
   }
 
   data = {
@@ -54,7 +54,7 @@ resource "kubernetes_secret" "donation_service" {
 resource "kubernetes_secret" "ngo_service" {
   metadata {
     name      = "ngo-service-secret"
-    namespace = kubernetes_namespace.this.metadata[0].name
+    namespace = kubernetes_namespace.this[count.index]
   }
 
   data = {
