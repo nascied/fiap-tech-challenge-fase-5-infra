@@ -31,6 +31,7 @@
 # só vê que o namespace já existe e segue em frente, sem conflito.
 
 resource "kubernetes_namespace" "this" {
+  count = contains(data.kubernetes_all_namespaces.this.namespaces, var.namespace) ? 0 : 1
   metadata {
     name = var.namespace
   }
