@@ -52,6 +52,12 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "k8s_namespace_exists" {
+  description = "Se o namespace 'fiap-tc-f5' já existe no cluster (module.k8s_secrets) — ver modules/k8s-secrets/variable.tf pro porquê de ser um bool simples, não um data source. Populado automaticamente via TF_VAR_k8s_namespace_exists por scripts/05-plan.sh (detecta com `kubectl get namespace` antes do plan); default aqui é só o fallback seguro pra quem rodar terraform direto sem passar pelo script."
+  type        = bool
+  default     = false
+}
+
 # --- FinOps: tagging (ver README.md, seção "Estratégia de Tags") ---
 
 variable "environment" {

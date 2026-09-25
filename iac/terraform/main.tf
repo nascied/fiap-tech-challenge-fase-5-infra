@@ -122,7 +122,8 @@ module "secrets" {
 module "k8s_secrets" {
   source = "./modules/k8s-secrets"
 
-  namespace = "fiap-tc-f5"
+  namespace        = "fiap-tc-f5"
+  namespace_exists = var.k8s_namespace_exists
 
   donation_database_url  = module.db.aws_db_instance_connection_strings[0]
   donation_sqs_queue_url = module.sqs.sqs_queue_url

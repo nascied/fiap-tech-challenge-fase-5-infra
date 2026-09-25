@@ -14,27 +14,13 @@ override_data {
   }
 }
 
-# "Invalid count argument" em kubernetes_namespace.this (module.k8s_secrets):
-# a CONFIG do provider kubernetes/helm (provider.tf) vem de
-# module.eks.aws_eks_cluster_endpoint/certificate_authority_data — sob
-# mock_provider "aws", esses outputs não ficam conhecidos em tempo de plan
-# (aws_eks_cluster_certificate_authority_data indexa certificate_authority[0],
-# lista aninhada que o mock trata como tamanho desconhecido até o apply). Sem
-# a config do provider resolvida, count não pode depender de nada que passe
-# por ele — nem override_data no data source, nem override_resource no
-# aws_eks_cluster.this (ambos tentados, ambos insuficientes: o problema é
-# anterior à leitura do data source em si). Fix: override_module substitui o
-# módulo inteiro por outputs fixos pro teste, sem avaliar count/data source
-# nenhum — módulo já validado de verdade contra um `terraform plan` real
-# (cluster fiap-tc-f5-eks existente), não precisa ser replanejado aqui.
-override_module {
-  target = module.k8s_secrets
-  outputs = {
-    namespace                    = "fiap-tc-f5"
-    donation_service_secret_name = "donation-service-secret"
-    ngo_service_secret_name      = "ngo-service-secret"
-  }
-}
+# module.k8s_secrets não precisa mais de override_module/override_data: desde
+# que kubernetes_namespace.this (modules/k8s-secrets/main.tf) passou a usar
+# `count = var.namespace_exists ? 0 : 1` (bool simples, default false) em vez
+# de um data source, count resolve normalmente em plan mesmo sob
+# mock_provider "aws" — não depende mais da config do provider
+# kubernetes/helm (que continua "unknown até o apply" sob o mock, mas isso
+# não bloqueia mais nada aqui). Ver CLAUDE.md pro histórico do bug antigo.
 
 variables {
   aws_vpc = {
