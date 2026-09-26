@@ -1,5 +1,6 @@
 mock_provider "aws" {}
 mock_provider "helm" {}
+mock_provider "kubernetes" {}
 mock_provider "random" {}
 
 # aws_lambda_function.role valida formato de ARN no client-side; o valor mock
@@ -12,6 +13,14 @@ override_data {
     arn = "arn:aws:iam::123456789012:role/LabRole"
   }
 }
+
+# module.k8s_secrets não precisa mais de override_module/override_data: desde
+# que kubernetes_namespace.this (modules/k8s-secrets/main.tf) passou a usar
+# `count = var.namespace_exists ? 0 : 1` (bool simples, default false) em vez
+# de um data source, count resolve normalmente em plan mesmo sob
+# mock_provider "aws" — não depende mais da config do provider
+# kubernetes/helm (que continua "unknown até o apply" sob o mock, mas isso
+# não bloqueia mais nada aqui). Ver CLAUDE.md pro histórico do bug antigo.
 
 variables {
   aws_vpc = {
@@ -69,11 +78,6 @@ variables {
   aws_sqs_queue_name      = "solidary-donations"
   aws_dynamodb_table_name = "SolidaryTechVolunteers"
   aws_eks_cluster_version = "1.35"
-
-  # Mock — terraform test roda com mock_provider "aws" {}, nenhuma chamada real.
-  aws_access_key_id     = "AKIAMOCKMOCKMOCKMOCK"
-  aws_secret_access_key = "mock-secret-access-key"
-  aws_session_token     = "mock-session-token"
 
   # Mock — module.incident_bridge (ITSM/AIOps self-healing, ver aiops/README.md)
   github_token             = "mock-github-token"

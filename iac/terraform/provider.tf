@@ -26,3 +26,18 @@ provider "helm" {
     }
   }
 }
+
+# Usado por module.k8s_secrets — mesma conexão do provider helm acima, mas
+# como resource "kubernetes_secret" (não Helm release). Ver comentário em
+# modules/k8s-secrets/main.tf pro porquê desse módulo existir (Opção 2 do
+# bloqueio de IRSA/Pod Identity do CSI Driver pro donation-service/ngo-service).
+provider "kubernetes" {
+  host                   = module.eks.aws_eks_cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.aws_eks_cluster_certificate_authority_data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.aws_eks_cluster_name]
+  }
+}

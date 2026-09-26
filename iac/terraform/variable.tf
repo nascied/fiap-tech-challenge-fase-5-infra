@@ -52,6 +52,12 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "k8s_namespace_exists" {
+  description = "Se o namespace 'fiap-tc-f5' já existe no cluster (module.k8s_secrets) — ver modules/k8s-secrets/variable.tf pro porquê de ser um bool simples, não um data source. Populado automaticamente via TF_VAR_k8s_namespace_exists por scripts/05-plan.sh (detecta com `kubectl get namespace` antes do plan); default aqui é só o fallback seguro pra quem rodar terraform direto sem passar pelo script."
+  type        = bool
+  default     = false
+}
+
 # --- FinOps: tagging (ver README.md, seção "Estratégia de Tags") ---
 
 variable "environment" {
@@ -125,34 +131,17 @@ variable "velero_included_namespaces" {
 
 # --- Secrets Manager (consumido via Secrets Store CSI Driver no cluster) ---
 #
-# donation-service e volunteer-service leem DATABASE_URL/credenciais AWS daqui
-# em vez de Secret do Kubernetes com valor literal no Helm values.yaml. Ver
-# modules/secretsmanager e helm/{donation,volunteer}-service/templates/
-# secretproviderclass.yaml no repo GitOps.
+# donation-service e ngo-service leem DATABASE_URL daqui em vez de Secret do
+# Kubernetes com valor literal no Helm values.yaml. Ver modules/secretsmanager
+# e helm/{donation,ngo}-service/templates/secretproviderclass.yaml no repo
+# GitOps.
 #
-# aws_access_key_id/secret/session_token: NÃO têm default de propósito — são as
-# credenciais de sessão temporária (~4h) da própria conta AWS Academy usada pra
-# rodar o terraform apply. Passe via -var, TF_VAR_*, ou um *.auto.tfvars não
-# versionado — nunca commitar valor real em .tfvars. Precisam ser reenviadas
-# (novo apply) toda vez que a sessão expirar.
-
-variable "aws_access_key_id" {
-  description = "Access key da sessão AWS Academy — usada para popular o Secrets Manager (não versionar valor real)"
-  type        = string
-  sensitive   = true
-}
-
-variable "aws_secret_access_key" {
-  description = "Secret key da sessão AWS Academy — usada para popular o Secrets Manager (não versionar valor real)"
-  type        = string
-  sensitive   = true
-}
-
-variable "aws_session_token" {
-  description = "Session token da sessão AWS Academy (credenciais STS temporárias) — usada para popular o Secrets Manager (não versionar valor real)"
-  type        = string
-  sensitive   = true
-}
+# Sem variáveis de credencial AWS estática aqui (removidas numa sessão
+# posterior): confirmado empiricamente, com um pod real no cluster sem
+# ServiceAccount/CSI nenhum, que a cadeia padrão de credenciais do SDK já
+# resolve sozinha via IMDS -> instance profile do node -> LabRole (mesmo
+# caminho que module.velero já usa) — não há credencial de app pra popular
+# no Secrets Manager.
 
 # --- ITSM/AIOps: self-healing (module.incident_bridge, ver aiops/README.md) ---
 

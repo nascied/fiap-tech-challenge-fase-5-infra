@@ -4,12 +4,19 @@
 Fluxo: PagerDuty (incident.triggered) -> Lambda-ponte -> GitHub Actions
 (repository_dispatch) -> este script.
 
-O script recebe o contexto de um incidente do PagerDuty, pede pro Claude
+O script recebe o contexto de um incidente do PagerDuty, pede pro Gemini
 decidir se um "rollout restart" do Deployment afetado é uma ação sensata, e
 se for, executa via kubectl (kubeconfig já configurado pelo workflow antes de
 chamar este script). Toda decisão e ação é logada em JSON estruturado no
 stdout (captura do GitHub Actions), reportada no Slack, e o incidente é
 resolvido no PagerDuty quando a ação é bem-sucedida.
+
+Modelo trocado de Claude (Anthropic) pra Gemini nesta sessão — motivo: a conta
+Anthropic ficou sem crédito, e o usuário já tinha uma API key gratuita do
+Google AI Studio disponível (tier gratuito real, sem cartão). Chamada via REST
+pura (`requests`, já era dependência do projeto) em vez de um SDK novo — só
+troca a implementação de `call_gemini`/`run_agent`, a lógica de decisão
+(system prompt, allowlist, tool schema) é a mesma.
 
 Uso:
     # via workflow (payload vem do repository_dispatch)
@@ -26,13 +33,18 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any
 
-import anthropic
 import requests
 
-MODEL = "claude-sonnet-5"
+# "gemini-flash-latest" é o alias usado no exemplo de código gerado pelo
+# próprio Google AI Studio ao criar a API key — resolveu pra "gemini-3.8-flash"
+# no momento da validação desta sessão (confirmado via curl real, campo
+# "modelVersion" da resposta).
+GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 # service -> namespace K8s (os 3 microsserviços rodam todos no mesmo namespace
 # hoje, ver fiap-tech-challenge-fase-5-observability/CLAUDE.md "namespace=fiap-tc-f5")
@@ -60,6 +72,11 @@ Sempre explique seu raciocínio de forma curta e objetiva antes ou depois de \
 decidir. Essa explicação vira registro de auditoria do incidente.
 """
 
+# Formato "functionDeclarations" do Gemini (parameters = JSON Schema comum,
+# sem "strict"/"additionalProperties" — esses são convenções específicas do
+# tool-use da Anthropic, não existem/não são exigidos aqui). A allowlist de
+# serviço continua garantida em duas camadas: o "enum" abaixo (o modelo não
+# escolhe um nome livre) e uma segunda checagem em execute_restart().
 RESTART_TOOL = {
     "name": "restart_deployment",
     "description": (
@@ -70,7 +87,7 @@ RESTART_TOOL = {
         "óbvia). Não use para problemas de dependência externa (banco de dados, "
         "fila) que um restart da aplicação não resolve."
     ),
-    "input_schema": {
+    "parameters": {
         "type": "object",
         "properties": {
             "service": {
@@ -84,9 +101,7 @@ RESTART_TOOL = {
             },
         },
         "required": ["service", "reason"],
-        "additionalProperties": False,
     },
-    "strict": True,
 }
 
 
@@ -100,10 +115,10 @@ def extract_service_name(payload: dict) -> str | None:
     """Acha qual dos 3 serviços conhecidos está envolvido no incidente.
 
     Evita depender do formato exato de custom_details do webhook V3 do
-    PagerDuty (não confirmado ao vivo nesta sessão — ver aiops/README.md).
-    Em vez disso, procura o nome do serviço em qualquer texto do payload
+    PagerDuty — procura o nome do serviço em qualquer texto do payload
     (título/descrição/summary), que é o campo mais estável entre versões
-    da API do PagerDuty.
+    da API do PagerDuty. Confirmado ao vivo numa sessão posterior contra um
+    payload real (não só o fixture sintético).
     """
     haystack = json.dumps(payload, ensure_ascii=False).lower()
     for service in ALLOWED_SERVICES:
@@ -113,8 +128,9 @@ def extract_service_name(payload: dict) -> str | None:
 
 
 def extract_incident_id(payload: dict) -> str | None:
-    """Tenta achar o ID do incidente no payload do webhook V3 do PagerDuty
-    (event.data.id — formato não confirmado ao vivo nesta sessão, ver README)."""
+    """Acha o ID do incidente no payload do webhook V3 do PagerDuty
+    (event.data.id — confirmado ao vivo numa sessão posterior contra um
+    incidente real)."""
     event = payload.get("pagerduty_event", payload).get("event", {})
     data = event.get("data", {})
     return data.get("id")
@@ -170,11 +186,13 @@ def notify_slack(text: str) -> None:
 def resolve_pagerduty_incident(incident_id: str | None) -> None:
     """Resolve o incidente via REST API do PagerDuty (PUT /incidents/{id}).
 
-    Formato assumido, NÃO confirmado ao vivo nesta sessão (a documentação do
-    PagerDuty é renderizada via JS e o WebFetch não conseguiu extrair o
-    conteúdo) — confirmar contra https://developer.pagerduty.com antes de
-    depender disso em produção. Falha aqui não é fatal: o incidente
-    simplesmente continua aberto no PagerDuty pra alguém fechar manualmente.
+    Formato confirmado ao vivo numa sessão posterior — usado via curl real
+    pra resolver incidentes de teste manualmente (200 OK). Ainda não
+    confirmado sendo chamado por este script numa run real (nos testes até
+    agora, o incidente sempre se resolveu sozinho via Alertmanager antes do
+    agente terminar de decidir — ver aiops/README.md/CLAUDE.md). Falha aqui
+    não é fatal: o incidente simplesmente continua aberto no PagerDuty pra
+    alguém fechar manualmente.
     """
     token = os.environ.get("PAGERDUTY_API_TOKEN")
     from_email = os.environ.get("PAGERDUTY_FROM_EMAIL")
@@ -203,6 +221,38 @@ def resolve_pagerduty_incident(incident_id: str | None) -> None:
         log_event(event="pagerduty_resolve_failed", incident_id=incident_id, error=str(exc))
 
 
+def call_gemini(contents: list[dict], api_key: str) -> dict:
+    """Chama o endpoint generateContent do Gemini via REST puro.
+
+    Retry curto (2 tentativas extras) só pra 5xx — um 503 "high demand"
+    transiente apareceu de verdade validando este código nesta sessão
+    (confirmado via curl real, não hipótese), e como isso roda dentro de um
+    workflow de resposta a incidente, vale a pena não desistir na primeira.
+    """
+    payload = {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": contents,
+        "tools": [{"functionDeclarations": [RESTART_TOOL]}],
+        "generationConfig": {"maxOutputTokens": 1024},
+    }
+    headers = {"Content-Type": "application/json", "X-goog-api-key": api_key}
+
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(GEMINI_API_URL, headers=headers, json=payload, timeout=30)
+        except requests.RequestException as exc:
+            last_exc = exc
+        else:
+            if resp.status_code < 500:
+                resp.raise_for_status()
+                return resp.json()
+            last_exc = requests.HTTPError(f"{resp.status_code}: {resp.text[:500]}")
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
+    raise last_exc  # type: ignore[misc]
+
+
 def run_agent(payload: dict, dry_run: bool) -> int:
     service = extract_service_name(payload)
     incident_id = extract_incident_id(payload)
@@ -210,9 +260,12 @@ def run_agent(payload: dict, dry_run: bool) -> int:
 
     log_event(event="incident_received", service=service, incident_id=incident_id)
 
-    client = anthropic.Anthropic()
-    messages = [{"role": "user", "content": summary}]
-    tools = [RESTART_TOOL]
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        log_event(event="agent_error", error="GEMINI_API_KEY não configurada")
+        return 1
+
+    contents: list[dict] = [{"role": "user", "parts": [{"text": summary}]}]
 
     action_taken = None
     final_text_parts: list[str] = []
@@ -220,30 +273,42 @@ def run_agent(payload: dict, dry_run: bool) -> int:
     # Loop curto e limitado — no máximo uma decisão de restart por incidente.
     max_iterations = 3
     for _ in range(max_iterations):
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            tools=tools,
-            messages=messages,
-        )
-
-        for block in response.content:
-            if block.type == "text":
-                final_text_parts.append(block.text)
-
-        if response.stop_reason != "tool_use":
+        try:
+            data = call_gemini(contents, api_key)
+        except requests.RequestException as exc:
+            log_event(event="agent_error", error=str(exc))
             break
 
-        messages.append({"role": "assistant", "content": response.content})
+        candidates = data.get("candidates") or []
+        if not candidates:
+            log_event(event="agent_error", error="resposta do Gemini sem candidates", raw=data)
+            break
 
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-            if block.name == "restart_deployment":
-                target_service = block.input["service"]
-                reason = block.input["reason"]
+        model_content = candidates[0].get("content", {})
+        model_parts = model_content.get("parts", [])
+        function_calls = [p for p in model_parts if "functionCall" in p]
+
+        for part in model_parts:
+            if "text" in part:
+                final_text_parts.append(part["text"])
+
+        if not function_calls:
+            break
+
+        # Reanexa o content do modelo tal como veio (preserva o
+        # "thoughtSignature" de cada functionCall — o Gemini exige isso de
+        # volta na próxima chamada, senão rejeita com 400
+        # "Function call is missing a thought_signature", achado real
+        # validando este código nesta sessão).
+        contents.append(model_content)
+
+        response_parts = []
+        for part in function_calls:
+            call = part["functionCall"]
+            if call.get("name") == "restart_deployment":
+                args = call.get("args", {})
+                target_service = args.get("service")
+                reason = args.get("reason", "")
                 log_event(
                     event="restart_decided",
                     service=target_service,
@@ -252,15 +317,10 @@ def run_agent(payload: dict, dry_run: bool) -> int:
                 )
                 result = execute_restart(target_service, dry_run)
                 action_taken = {"service": target_service, "reason": reason, "result": result}
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(result),
-                        "is_error": not result.get("ok", False),
-                    }
+                response_parts.append(
+                    {"functionResponse": {"name": "restart_deployment", "response": result}}
                 )
-        messages.append({"role": "user", "content": tool_results})
+        contents.append({"role": "user", "parts": response_parts})
 
     reasoning = "\n".join(final_text_parts).strip()
     log_event(event="agent_finished", action_taken=action_taken, reasoning=reasoning)
@@ -268,14 +328,14 @@ def run_agent(payload: dict, dry_run: bool) -> int:
     slack_lines = [
         f"*Incidente SolidaryTech — self-healing*",
         f"Serviço: `{service or 'desconhecido'}`",
-        f"Raciocínio do Claude: {reasoning or '(sem texto)'}",
+        f"Raciocínio do Gemini: {reasoning or '(sem texto)'}",
     ]
     if action_taken:
         ok = action_taken["result"].get("ok")
         status = "restart executado" if ok and not dry_run else "restart simulado (dry-run)" if dry_run else "restart FALHOU"
         slack_lines.append(f"Ação: {status} em `{action_taken['service']}` — {action_taken['reason']}")
     else:
-        slack_lines.append("Ação: nenhuma — Claude decidiu não reiniciar nada.")
+        slack_lines.append("Ação: nenhuma — Gemini decidiu não reiniciar nada.")
 
     notify_slack("\n".join(slack_lines))
 

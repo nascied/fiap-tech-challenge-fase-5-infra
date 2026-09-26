@@ -4,3 +4,8 @@
 data "aws_iam_role" "this" {
   name = "LabRole"
 }
+
+# Usado só pra sufixar o nome do bucket do Velero com o account_id (ver
+# locals.tf) — evita colisão de nome globalmente único no S3 entre contas
+# Academy diferentes.
+data "aws_caller_identity" "current" {}
