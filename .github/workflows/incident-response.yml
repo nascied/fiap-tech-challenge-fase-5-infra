@@ -9,7 +9,7 @@ on:
 
 jobs:
   respond:
-    name: Analisar incidente e decidir ação (Claude)
+    name: Analisar incidente e decidir ação (Gemini)
     runs-on: ubuntu-latest
     env:
       TF_IN_AUTOMATION: true
@@ -42,7 +42,7 @@ jobs:
 
       - name: Executa o agente de self-healing
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           INCIDENT_SLACK_WEBHOOK_URL: ${{ secrets.INCIDENT_SLACK_WEBHOOK_URL }}
           PAGERDUTY_API_TOKEN: ${{ secrets.PAGERDUTY_API_TOKEN }}
           PAGERDUTY_FROM_EMAIL: ${{ secrets.PAGERDUTY_FROM_EMAIL }}

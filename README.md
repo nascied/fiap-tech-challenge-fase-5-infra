@@ -131,7 +131,7 @@ Projeção de custo mensal da arquitetura provisionada por este Terraform, com r
 │   ├── 00-check-session.sh … 08-destroy.sh
 │   ├── run-all.sh
 │   └── README.md
-├── aiops/                           # ITSM/AIOps: agente Claude de self-healing de incidentes
+├── aiops/                           # ITSM/AIOps: agente Gemini de self-healing de incidentes
 │   ├── incident_response.py
 │   ├── fixtures/sample_incident.json
 │   └── README.md
@@ -315,7 +315,7 @@ Nenhum desses vai em `.tfvars` — são resolvidos em runtime pelo `env:` do job
 
 O backend remoto (bucket S3, caminho do state por ambiente) **não é secret** — vem dos arquivos já versionados `backends/dev.tfbackend`/`backends/prd.tfbackend` (`terraform init -backend-config="backends/${DEPLOY_ENV}.tfbackend"`), e o `.tfvars` de cada ambiente também já está versionado (`terraform.dev.tfvars`/`terraform.prd.tfvars`) — não é conteúdo de secret. O backend usa lock nativo por arquivo (`use_lockfile = true`), sem tabela DynamoDB de lock.
 
-Secrets adicionais só são necessários pro workflow de self-healing (`incident-response.yml`) — `ANTHROPIC_API_KEY`, `EKS_CLUSTER_NAME`, `INCIDENT_SLACK_WEBHOOK_URL`, `PAGERDUTY_API_TOKEN`/`PAGERDUTY_FROM_EMAIL` — ver [`aiops/README.md`](aiops/README.md).
+Secrets adicionais só são necessários pro workflow de self-healing (`incident-response.yml`) — `GEMINI_API_KEY`, `EKS_CLUSTER_NAME`, `INCIDENT_SLACK_WEBHOOK_URL`, `PAGERDUTY_API_TOKEN`/`PAGERDUTY_FROM_EMAIL` — ver [`aiops/README.md`](aiops/README.md).
 
 **Rodando localmente (`scripts/`) em vez da pipeline**: `TF_VAR_github_token` e `TF_VAR_pagerduty_webhook_secret` precisam ser exportados manualmente no shell antes de rodar os scripts (`05-plan.sh`/`06-apply.sh`) — não tem "secret do GitHub" fora da pipeline. Fora isso, só é preciso ter uma sessão AWS Academy válida no shell (`aws sts get-caller-identity` funcionando) — nenhum script resolve/injeta credencial AWS como variável Terraform, já que não existe mais nenhuma no código (ver `scripts/README.md`).
 
