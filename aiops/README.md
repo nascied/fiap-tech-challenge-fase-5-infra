@@ -13,25 +13,50 @@ serviço afetado resolve o sintoma e, se decidir que sim, executa de verdade.
 
 ## Fluxo completo
 
+Gatilho exato (nada disso precisa de intervenção manual — Prometheus avalia
+sozinho a cada ~30s): `SLOErrorBudgetBurnFast` dispara quando a taxa de
+respostas 5xx do `donation-service` passa de **1,44% das requisições, por 5
+minutos, sustentado por mais 2 minutos contínuos** (`alerting/prometheusrule-slo-burn.yaml`,
+repo `observability`). Só `donation-service` está em `severity: critical`
+hoje — `ngo-service`/`volunteer-service` têm a mesma regra em `severity:
+warning` (só Slack, não aciona o self-healing).
+
+```mermaid
+flowchart TD
+    A["donation-service: taxa de erro 5xx > 1,44%<br/>sustentada por 2+ min"] -->|Prometheus avalia<br/>a cada ~30s| B{"SLOErrorBudgetBurnFast<br/>firing?"}
+    B -->|não| A
+    B -->|"sim (severity=critical)"| C["Alertmanager<br/>group_wait 30s"]
+    C --> D["PagerDuty<br/>pagerduty_configs cria o incidente"]
+    C --> E["Slack<br/>#solidary-tech-incidentes-criticos"]
+    D -->|"Webhook V3<br/>incident.triggered"| F["Lambda-ponte (bridge.py)<br/>verifica x-pagerduty-signature"]
+    F --> G{"assinatura<br/>válida?"}
+    G -->|não| H["401 — descarta"]
+    G -->|sim| I["repository_dispatch<br/>(API do GitHub)"]
+    I --> J["GitHub Actions<br/>incident-response.yml"]
+    J --> K["incident_response.py<br/>extrai service + incident_id do payload"]
+    K --> L["Gemini analisa o incidente<br/>(function calling)"]
+    L --> M{"decide reiniciar?"}
+    M -->|"não (causa externa)"| N["Loga raciocínio<br/>Slack: nenhuma ação"]
+    M -->|sim| O["kubectl rollout restart<br/>deployment/donation-service"]
+    O --> P["Slack: restart executado"]
+    O --> Q["PUT /incidents/{id}<br/>resolve no PagerDuty"]
+
+    style A fill:#f96
+    style M fill:#ff9
+    style O fill:#9f9
 ```
-Prometheus (PrometheusRule de burn rate)
-  -> Alertmanager (severity="critical", hoje só donation-service)
-       -> pagerduty_configs (routing key, ver values/kube-prometheus-stack.yaml)
-            -> PagerDuty cria o incidente
-                 -> Webhook V3 (incident.triggered) -> Lambda-ponte
-                      (iac/terraform/modules/lambda) reformata o payload e
-                      chama a API do GitHub (repository_dispatch)
-                        -> .github/workflows/incident-response.yml
-                             -> aiops/incident_response.py (este diretório)
-                                  1. extrai qual serviço está envolvido
-                                  2. pede pro Gemini (gemini-flash-latest)
-                                     decidir se um restart resolve, com
-                                     function calling
-                                  3. se decidir que sim: kubectl rollout
-                                     restart no Deployment certo
-                                  4. posta o resultado no Slack
-                                  5. resolve o incidente no PagerDuty
-```
+
+**Confirmado ponta a ponta contra infraestrutura real** numa sessão posterior
+(não só desenhado) — ver `CLAUDE.md` do repo pra timeline completa com IDs de
+incidente reais.
+
+**Gap real, conhecido, ainda sem fix**: esse fluxo só cobre "serviço de pé
+mas respondendo erro" — um pod que **crasha antes de responder** (ex.: falha
+de conexão no startup) não gera a métrica de resposta 5xx nenhuma, então
+nunca dispara este alerta. Confirmado na prática: 425 restarts do
+`donation-service` numa janela de 37h não dispararam nada. Fechar esse gap
+exigiria uma regra nova baseada em `kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}`
+(ou `up == 0`) com `severity: critical`, ainda não implementada.
 
 **Por que uma ponte Lambda e não PagerDuty -> GitHub direto?** O endpoint
 `repository_dispatch` do GitHub exige um corpo específico
