@@ -26,6 +26,45 @@ na ordem certa. Também dá pra usar via `make` (ver `Makefile` na raiz do repo)
 
 `lib/common.sh` concentra as funções compartilhadas (log/warn/die, validação de ambiente, checagem de sessão) — não é executado direto.
 
+## Scripts opcionais — teste de DR cross-region (`dr-test-*.sh`)
+
+Fora do ciclo `dev|prd` acima **de propósito** — não usam `require_env`, não tocam no state/main.tf principal, e não fazem parte do `run-all.sh`. Servem só pra validar, sob demanda, que o backup do Velero sobrevive à perda de uma região inteira, criando um cluster EKS **mínimo e descartável** numa região diferente (padrão `us-west-2`) via `eksctl` e restaurando a partir do bucket S3 **real de produção** (`us-east-1`, montado `accessMode: ReadOnly` — nunca escreve nele).
+
+| Script | O que faz | Precisa de credencial AWS real? |
+|---|---|---|
+| `dr-test-create.sh [regiao] [nome-cluster]` | Cria o cluster (`eksctl`, reaproveitando `LabRole` — sem IAM role nova) e instala o Velero apontado pro bucket de produção, com confirmação interativa | Sim |
+| `dr-test-restore-data.sh [regiao-destino] [regiao-origem] [nome-cluster]` | Restaura a camada de dados (RDS via snapshot+cópia cross-region+restore, DynamoDB via export+import cross-region) na região do cluster de teste — ver seção própria abaixo | Sim |
+| `dr-test-destroy-data.sh [regiao-destino] [regiao-origem]` | Destrói tudo que `dr-test-restore-data.sh` criou (RDS/DynamoDB/bucket de export/SG/subnet group/snapshots) — nunca toca a produção | Sim |
+| `dr-test-destroy.sh [regiao] [nome-cluster]` | Destrói o cluster de teste (`eksctl delete cluster`), com dupla confirmação (nome do cluster) | Sim |
+
+**Por que isso não usa o `main.tf`/scripts `00`-`08` já existentes** (achado real, validado nesta sessão contra a conta AWS Academy):
+1. `require_env` (`lib/common.sh`) só aceita `dev|prd` — não existe um terceiro ambiente "dr-test" no `.tfvars`.
+2. `07-update-kubeconfig.sh` tem `--region us-east-1` fixo — não dá pra apontar pra outra região sem editar o script.
+3. `provider "aws"` (`iac/terraform/provider.tf`) **não tem `region` explícita** — segue só a env var/perfil ativo da sessão AWS CLI, completamente desacoplado de `var.aws_region` (que só chega a alguns módulos como string simples, ex. `velero`/`secretsmanager`/`cluster-autoscaler`). Rodar o `main.tf` inteiro com a sessão apontada pra `us-west-2` tentaria recriar TODO o stack lá (VPC/EKS/RDS/DynamoDB/SQS/ECR/ArgoCD/Backup/Velero/Lambda), não só um EKS mínimo.
+4. `main.tf` da raiz é monolítico — não existe um caminho "só sobe o EKS" sem subir o resto.
+5. Nomes de bucket S3 (`velero_bucket_name`) não são parametrizados por região — reaproveitar o mesmo bucket de origem (não recriar um novo) é o comportamento desejado aqui, então isso nem seria um problema a resolver, só reforça que o caminho certo é apontar pro bucket existente, não replicar infraestrutura.
+
+`eksctl` contorna os 5 pontos acima numa tacada só: cluster isolado, região arbitrária via parâmetro, sem tocar em nenhum state/módulo Terraform existente, reaproveitando `LabRole` (`iam.serviceRoleARN`/`iam.instanceRoleARN` no YAML gerado) pra não esbarrar na restrição de "sem IAM role própria" da conta Academy.
+
+**Validado de ponta a ponta contra a AWS Academy real** (não é só teoria): cluster `fiap-tc-f5-dr-test` criado em `us-west-2` (~14min), Velero instalado apontando pro bucket real `fiap-tc-f5-velero-backups-<account-id>` (`us-east-1`), os 2 backups de produção descobertos automaticamente (`backup-sync` controller) e um restore real do namespace `fiap-tc-f5` completado com sucesso (38/38 itens). Ver `CLAUDE.md`, seção "Teste real de DR cross-region", pro relato completo (incluindo as 2 limitações esperadas encontradas: sem VPC peering pro RDS de produção, e capacidade de pod limitada pelo único node pequeno — nenhuma delas é bug deste script).
+
+**Custo real**: ~US\$0,10–0,15/h enquanto o cluster de teste estiver de pé (1× `t3.small` + control plane EKS) — sempre rodar `dr-test-destroy.sh` ao terminar a validação.
+
+### `dr-test-restore-data.sh`/`dr-test-destroy-data.sh` — fechando a lacuna da camada de dados
+
+`dr-test-create.sh` sozinho só cobre o estado do cluster Kubernetes (Velero) — `donation-service`/`ngo-service` ficam `CrashLoopBackOff` porque não há RDS na região do cluster de teste, e não dá pra usar o RDS de produção sem VPC peering (que este teste não configura de propósito, pra não arriscar nada em produção). `dr-test-restore-data.sh` fecha essa lacuna, encapsulando o fluxo **validado ao vivo contra a AWS Academy real**:
+
+- **RDS** (`donation-service`/`ngo-service`): não existe atalho — PITR nativo do RDS é *same-region*, então o caminho é sempre `create-db-snapshot` (origem) → `copy-db-snapshot --source-region` (cross-region) → `restore-db-instance-from-db-snapshot` (destino). O script cria/reaproveita um security group (porta 5432 liberada só pro CIDR da VPC) e um DB subnet group nas subnets privadas do cluster de teste — sem VPC peering nenhum, o RDS só precisa nascer **dentro** da mesma VPC dos pods. Senha do master é preservada automaticamente pelo snapshot.
+- **DynamoDB** (`volunteer-service`): mesma lógica — `restore-table-to-point-in-time` também é *same-region* (cross-region de verdade exigiria Global Tables, não configurado neste projeto). Caminho usado: `export-table-to-point-in-time` (S3, região de origem) → `import-table` (região de destino).
+
+🐛 **Bug real da API do DynamoDB, encontrado e corrigido nesta sessão** (o script já nasce com o fix): a primeira tentativa manual de `import-table` falhou com `ItemValidationError` (0 itens importados) porque (1) o `S3KeyPrefix` apontava pra uma pasta que misturava arquivos de dados (`data/*.json.gz`) com manifests do export (`manifest-summary.json`, `manifest-files.json`, `.md5`) — o `import-table` tenta ler **todo objeto sob o prefixo** como item, sem saber ignorar manifests —, e (2) faltou `--input-compression-type GZIP` (os exports point-in-time do DynamoDB sempre vêm comprimidos). O script aponta o prefixo só pra subpasta `.../data/` e sempre passa `GZIP` — evita repetir o erro.
+
+**Validado de ponta a ponta com dados reais** (não só os bancos isolados — os 3 microsserviços rodando no cluster de teste, secrets/configmap atualizados e serviços reiniciados): `donation-service` (`GET /donations`), `ngo-service` (`GET /ngos`) e `volunteer-service` (`GET /volunteers/1`) voltaram a servir dados idênticos aos de produção. Achado colateral: o `rollout restart` pode esbarrar na capacidade de pod do node único do teste (`Too many pods`) — resolvido escalando o node group pra 2 nodes (`eksctl scale nodegroup ... --nodes 2`, comando impresso no fim do script).
+
+**`dr-test-destroy-data.sh`** desfaz tudo (RDS/DynamoDB/bucket/SG/subnet group/snapshots em ambas as regiões) — pede a confirmação literal `destruir-dados-dr` (ação irreversível) e nunca toca a produção (RDS/DynamoDB reais ficam intocados; só os recursos com sufixo `-dr-test`/prefixo `-dr-<timestamp>` são removidos).
+
+**Custo real adicional**: 2× RDS `db.t3.micro` (~US\$0,016/h cada) + tabela DynamoDB (`PAY_PER_REQUEST`, praticamente grátis em volume de teste) + bucket S3 pequeno — soma pouco, mas ainda é custo real enquanto ficar de pé.
+
 ## 🐛 `module.k8s_secrets` — `Invalid count argument` num cluster novo (bug real, confirmado, e como foi resolvido)
 
 Rodar `terraform plan`/`apply` contra um ambiente **totalmente novo** (depois de um `destroy` completo, ou na primeira vez) batia neste erro:
@@ -73,6 +112,10 @@ Sem isso, `terraform plan`/`apply`/`destroy` falha com "No value for required va
 ./scripts/02-init.sh prd
 ./scripts/05-plan.sh prd
 ./scripts/06-apply.sh prd
+
+# Teste opcional de DR cross-region (fora do ciclo dev/prd acima)
+./scripts/dr-test-create.sh          # us-west-2 / fiap-tc-f5-dr-test (defaults)
+./scripts/dr-test-destroy.sh         # destrói ao terminar a validação
 ```
 
 ## O que os scripts NÃO fazem
