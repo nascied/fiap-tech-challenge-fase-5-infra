@@ -129,6 +129,26 @@ variable "velero_included_namespaces" {
   default     = ["*"]
 }
 
+# --- Cluster Autoscaler (module.cluster_autoscaler) ---
+
+variable "cluster_autoscaler_namespace" {
+  description = "Namespace onde o Cluster Autoscaler será instalado"
+  type        = string
+  default     = "kube-system"
+}
+
+variable "cluster_autoscaler_chart_version" {
+  description = "Versão do chart Helm autoscaler/cluster-autoscaler"
+  type        = string
+  default     = "9.59.0"
+}
+
+variable "cluster_autoscaler_scale_down_enabled" {
+  description = "Se false, o Cluster Autoscaler só escala pra cima — nunca remove nodes existentes"
+  type        = bool
+  default     = true
+}
+
 # --- Secrets Manager (consumido via Secrets Store CSI Driver no cluster) ---
 #
 # donation-service e ngo-service leem DATABASE_URL daqui em vez de Secret do

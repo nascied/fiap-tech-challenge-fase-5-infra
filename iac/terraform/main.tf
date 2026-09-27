@@ -72,6 +72,18 @@ module "velero" {
   depends_on = [module.eks, module.backup]
 }
 
+module "cluster_autoscaler" {
+  source = "./modules/cluster-autoscaler"
+
+  cluster_name       = module.eks.aws_eks_cluster_name
+  namespace          = var.cluster_autoscaler_namespace
+  chart_version      = var.cluster_autoscaler_chart_version
+  aws_region         = var.aws_region
+  scale_down_enabled = var.cluster_autoscaler_scale_down_enabled
+
+  depends_on = [module.eks]
+}
+
 module "sqs" {
   source = "./modules/sqs"
 

@@ -215,6 +215,15 @@ output "velero_release_status" {
 }
 
 #----------------------------
+# Cluster Autoscaler
+#----------------------------
+
+output "cluster_autoscaler_release_status" {
+  value       = module.cluster_autoscaler.cluster_autoscaler_release_status
+  description = "Status do release Helm do Cluster Autoscaler"
+}
+
+#----------------------------
 # Secrets Manager
 #----------------------------
 
